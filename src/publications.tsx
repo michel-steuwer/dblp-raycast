@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { Action, ActionPanel, Color, Icon, List, open } from "@raycast/api";
 import { useDblp } from "./hooks";
 import { Author, getPublications, Publication, PublicationType, typeLabel } from "./dblp";
+import { copyBibtex } from "./copy-bibtex";
+import { PublicationDetail } from "./publication-detail";
 
 const TYPE_ICON: Record<PublicationType, { source: Icon; tintColor: Color }> = {
   article: { source: Icon.Document, tintColor: Color.Purple },
@@ -11,9 +13,9 @@ const TYPE_ICON: Record<PublicationType, { source: Icon; tintColor: Color }> = {
   incollection: { source: Icon.Document, tintColor: Color.Orange },
   phdthesis: { source: Icon.Crown, tintColor: Color.Yellow },
   mastersthesis: { source: Icon.Crown, tintColor: Color.Yellow },
-  www: { source: Icon.Globe, tintColor: Color.Gray },
-  data: { source: Icon.HardDrive, tintColor: Color.Brown },
-  other: { source: Icon.QuestionMark, tintColor: Color.Gray },
+  www: { source: Icon.Globe, tintColor: Color.SecondaryText },
+  data: { source: Icon.HardDrive, tintColor: Color.Orange },
+  other: { source: Icon.QuestionMark, tintColor: Color.SecondaryText },
 };
 
 export function PublicationList({ author }: { author: Author }) {
@@ -36,6 +38,21 @@ export function PublicationList({ author }: { author: Author }) {
     return (publications ?? []).filter((p) => p.type === typeFilter);
   }, [publications, typeFilter]);
 
+  // Group publications by year, preserving the newest-first ordering.
+  const groups = useMemo(() => {
+    const byYear = new Map<string, Publication[]>();
+    for (const pub of filtered) {
+      const year = pub.year ?? "Unknown year";
+      const bucket = byYear.get(year);
+      if (bucket) {
+        bucket.push(pub);
+      } else {
+        byYear.set(year, [pub]);
+      }
+    }
+    return [...byYear.entries()];
+  }, [filtered]);
+
   return (
     <List
       isLoading={isLoading}
@@ -57,7 +74,17 @@ export function PublicationList({ author }: { author: Author }) {
           description={`DBLP has no matching records for ${author.name}.`}
         />
       ) : (
-        filtered.map((pub) => <PublicationItem key={pub.key} publication={pub} author={author} />)
+        groups.map(([year, pubs]) => (
+          <List.Section
+            key={year}
+            title={year}
+            subtitle={`${pubs.length} ${pubs.length === 1 ? "publication" : "publications"}`}
+          >
+            {pubs.map((pub) => (
+              <PublicationItem key={pub.key} publication={pub} author={author} />
+            ))}
+          </List.Section>
+        ))
       )}
     </List>
   );
@@ -66,16 +93,15 @@ export function PublicationList({ author }: { author: Author }) {
 function PublicationItem({ publication, author }: { publication: Publication; author: Author }) {
   const icon = TYPE_ICON[publication.type] ?? TYPE_ICON.other;
 
-  const coAuthors = publication.authors.filter((a) => a !== author.name);
+  const people = publication.authors.length > 0 ? publication.authors : publication.editors;
+  const coAuthors = people.filter((a) => a !== author.name);
   const subtitle =
     coAuthors.length > 0
       ? `with ${coAuthors.slice(0, 3).join(", ")}${coAuthors.length > 3 ? ", …" : ""}`
       : undefined;
 
+  // Year is shown in the section header, so only the venue is needed here.
   const accessories: List.Item.Accessory[] = [];
-  if (publication.year) {
-    accessories.push({ text: publication.year });
-  }
   if (publication.venue) {
     accessories.push({ tag: publication.venue });
   }
@@ -86,7 +112,7 @@ function PublicationItem({ publication, author }: { publication: Publication; au
       title={publication.title}
       subtitle={subtitle}
       accessories={accessories}
-      keywords={publication.authors}
+      keywords={[...publication.authors, ...publication.editors]}
       actions={
         <ActionPanel>
           {publication.ee && (
@@ -96,11 +122,18 @@ function PublicationItem({ publication, author }: { publication: Publication; au
               onAction={() => open(publication.ee!)}
             />
           )}
+          <Action.Push
+            icon={Icon.Sidebar}
+            title="Show Details"
+            target={<PublicationDetail publication={publication} />}
+            shortcut={{ modifiers: ["cmd"], key: "enter" }}
+          />
           {publication.dblpUrl && (
             <Action
               icon={Icon.Globe}
               title="Open on Dblp"
               onAction={() => open(publication.dblpUrl!)}
+              shortcut={{ modifiers: ["cmd"], key: "d" }}
             />
           )}
           <ActionPanel.Section>
@@ -116,9 +149,10 @@ function PublicationItem({ publication, author }: { publication: Publication; au
               content={publication.title}
               shortcut={{ modifiers: ["cmd", "shift"], key: "." }}
             />
-            <Action.CopyToClipboard
-              title="Copy Citation"
-              content={formatCitation(publication)}
+            <Action
+              icon={Icon.Clipboard}
+              title="Copy Bibtex"
+              onAction={() => copyBibtex(publication)}
               shortcut={{ modifiers: ["cmd"], key: "c" }}
             />
           </ActionPanel.Section>
@@ -126,11 +160,4 @@ function PublicationItem({ publication, author }: { publication: Publication; au
       }
     />
   );
-}
-
-function formatCitation(pub: Publication): string {
-  const authors = pub.authors.join(", ");
-  const venue = pub.venue ? ` ${pub.venue}.` : "";
-  const year = pub.year ? ` ${pub.year}.` : "";
-  return `${authors}. ${pub.title}.${venue}${year}`.trim();
 }

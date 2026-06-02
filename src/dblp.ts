@@ -3,6 +3,7 @@ import { XMLParser } from "fast-xml-parser";
 const BASE_URL = "https://dblp.uni-trier.de";
 const AUTHOR_SEARCH_URL = `${BASE_URL}/search/author/api`;
 const PERSON_BASE_URL = `${BASE_URL}/pid`;
+const REC_BASE_URL = `${BASE_URL}/rec`;
 
 export interface Author {
   /** DBLP person id, e.g. "21/8097" */
@@ -31,11 +32,25 @@ export interface Publication {
   type: PublicationType;
   title: string;
   authors: string[];
+  editors: string[];
   year?: string;
   /** Journal name or conference/book title (the "venue") */
   venue?: string;
-  /** Electronic edition link (DOI / PDF), if available */
+  journal?: string;
+  booktitle?: string;
+  publisher?: string;
+  school?: string;
+  series?: string;
+  volume?: string;
+  number?: string;
+  pages?: string;
+  isbn?: string;
+  /** All electronic edition links (DOI / PDF / publisher), in document order */
+  ees: string[];
+  /** Primary electronic edition link (DOI / PDF), if available */
   ee?: string;
+  /** DOI, if one is present among the electronic editions */
+  doi?: string;
   /** DBLP record page */
   dblpUrl?: string;
 }
@@ -140,6 +155,11 @@ interface RawRecord {
   booktitle?: unknown;
   publisher?: unknown;
   school?: unknown;
+  series?: unknown;
+  volume?: unknown;
+  number?: unknown;
+  pages?: unknown;
+  isbn?: unknown;
   ee?: unknown;
   url?: unknown;
 }
@@ -154,25 +174,41 @@ function parseRecord(type: PublicationType, raw: RawRecord): Publication {
 
   const title = (text(raw.title) ?? "Untitled").replace(/\.$/, "");
 
-  const venue = text(raw.journal) ?? text(raw.booktitle) ?? text(raw.school) ?? text(raw.publisher);
+  const journal = text(raw.journal);
+  const booktitle = text(raw.booktitle);
+  const school = text(raw.school);
+  const publisher = text(raw.publisher);
+  const venue = journal ?? booktitle ?? school ?? publisher;
 
-  // Prefer a DOI/publisher link; ee may be a single string or array.
+  // ee may be a single string or an array of links.
   const ees = toArray(raw.ee)
     .map((e) => text(e))
     .filter((e): e is string => Boolean(e));
-  const ee = ees[0];
+  const doi = ees.find((e) => /doi\.org/i.test(e));
 
   const urlPath = text(raw.url);
-  const dblpUrl = urlPath ? `https://dblp.org/${urlPath}` : undefined;
+  const dblpUrl = urlPath ? `${BASE_URL}/${urlPath}` : undefined;
 
   return {
     key: raw["@_key"] ?? `${type}-${title}`,
     type,
     title,
-    authors: authors.length > 0 ? authors : editors,
+    authors,
+    editors,
     year: text(raw.year),
     venue,
-    ee,
+    journal,
+    booktitle,
+    publisher,
+    school,
+    series: text(raw.series),
+    volume: text(raw.volume),
+    number: text(raw.number),
+    pages: text(raw.pages),
+    isbn: text(raw.isbn),
+    ees,
+    ee: ees[0],
+    doi,
     dblpUrl,
   };
 }
@@ -187,6 +223,8 @@ export async function getPublications(pid: string, signal?: AbortSignal): Promis
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: "@_",
+    // Decode HTML/numeric character references (e.g. "L&#252;cke" -> "Lücke").
+    htmlEntities: true,
   });
 
   const parsed = parser.parse(xml) as {
@@ -210,4 +248,18 @@ export async function getPublications(pid: string, signal?: AbortSignal): Promis
   // Newest first; entries without a year sink to the bottom.
   publications.sort((a, b) => Number(b.year ?? 0) - Number(a.year ?? 0));
   return publications;
+}
+
+/**
+ * Fetch the official BibTeX entry for a publication from DBLP.
+ *
+ * DBLP exposes BibTeX for any record at `https://dblp.org/rec/<key>.bib`,
+ * where `<key>` is the publication key (e.g. "journals/ewc/DyedovREJT15").
+ */
+export async function getBibtex(key: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(`${REC_BASE_URL}/${key}.bib`, { signal });
+  if (!response.ok) {
+    throw new Error(`Failed to load BibTeX (${response.status})`);
+  }
+  return (await response.text()).trim();
 }
