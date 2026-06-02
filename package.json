@@ -4,7 +4,7 @@
   "title": "DBLP Search",
   "description": "Search DBLP by author name and browse their publications.",
   "icon": "dblp-icon.png",
-  "author": "michel",
+  "author": "michel_steuwer",
   "categories": [
     "Documentation",
     "Web"
