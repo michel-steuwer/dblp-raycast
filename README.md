@@ -36,3 +36,5 @@ npm run lint    # lint & format check
 
 Bibliographic data provided by [dblp.org](https://dblp.org), released under the
 [ODC-BY 1.0](https://opendatacommons.org/licenses/by/1-0/) license.
+
+The extension icon is part of the [CoreUI Icons](https://github.com/coreui/coreui-icons) released under the [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.en) license.
